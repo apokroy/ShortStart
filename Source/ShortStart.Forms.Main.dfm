@@ -140,7 +140,6 @@ object MainForm: TMainForm
     TabOrder = 1
     ViewStyle = vsReport
     OnDblClick = ViewDblClick
-    ExplicitTop = 42
   end
   object Tray: TTrayIcon
     Icons = TrayImageList
@@ -651,7 +650,7 @@ object MainForm: TMainForm
       end
     end
     object Shorts1: TMenuItem
-      Caption = '&Short cuts'
+      Caption = '&Shortcuts'
       object Add1: TMenuItem
         Action = AddAction
       end

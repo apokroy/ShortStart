@@ -47,9 +47,9 @@ object CommandForm: TCommandForm
   object Label5: TLabel
     Left = 16
     Top = 62
-    Width = 44
+    Width = 41
     Height = 13
-    Caption = 'Short cut'
+    Caption = 'Shortcut'
   end
   object FileNameEdit: TEdit
     Left = 16
