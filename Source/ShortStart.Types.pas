@@ -31,7 +31,15 @@ type
   end;
 
   TCommandList = class(TList<TCommand>)
+  public
+    function  Add(const ShortCut: TShortCut; const FileName: string; const Operation: string = ''; const Parameters: string = ''; const WorkingDirectory: string = ''): TCommand; overload;
+    function  Add(const Key: Word; const ShiftState: TShiftState; const FileName: string; const Operation: string = ''; const Parameters: string = ''; const WorkingDirectory: string = ''): TCommand; overload;
+    function  Find(const ShortCut: TShortCut): TCommand;
+  end;
+
+  TSettings = class(TPersistent)
   private
+    FCommands: TCommandList;
     FEnabled: Boolean;
     FHandle: THandle;
     procedure SetEnabled(const Value: Boolean);
@@ -40,9 +48,7 @@ type
   public
     constructor Create;
     destructor Destroy; override;
-    function  Add(const ShortCut: TShortCut; const FileName: string; const Operation: string = ''; const Parameters: string = ''; const WorkingDirectory: string = ''): TCommand; overload;
-    function  Add(const Key: Word; const ShiftState: TShiftState; const FileName: string; const Operation: string = ''; const Parameters: string = ''; const WorkingDirectory: string = ''): TCommand; overload;
-    function  Find(const ShortCut: TShortCut): TCommand;
+    property  Commands: TCommandList read FCommands;
     procedure LoadFromStream(Stream: TStream);
     procedure SaveToStream(Stream: TStream);
     procedure LoadFromFile(const FileName: string);
@@ -52,7 +58,7 @@ type
   end;
 
 var
-  Commands: TCommandList;
+  Settings: TSettings;
 
 implementation
 
@@ -160,38 +166,40 @@ begin
   end;
 end;
 
-{ TCommandList }
+{ TSettings }
 
-constructor TCommandList.Create;
+constructor TSettings.Create;
 begin
   inherited Create;
 
+  FCommands := TCommandList.Create;
+
   FEnabled := True;
 
-  Add(Ord('N'), [ssAlt, ssCtrl], 'notepad.exe');
-  Add(Ord('C'), [ssAlt, ssCtrl], 'calc.exe');
-  Add(Ord('P'), [ssAlt, ssCtrl], 'mspaint.exe');
-  Add(Ord('D'), [ssAlt, ssCtrl], 'explorer.exe', '', '%DEFAULTUSERPROFILE%');
+  Commands.Add(Ord('N'), [ssAlt, ssCtrl], 'notepad.exe');
+  Commands.Add(Ord('C'), [ssAlt, ssCtrl], 'calc.exe');
+  Commands.Add(Ord('P'), [ssAlt, ssCtrl], 'mspaint.exe');
+  Commands.Add(Ord('D'), [ssAlt, ssCtrl], 'explorer.exe', '', '%DEFAULTUSERPROFILE%');
 
   FHandle := AllocateHWnd(WndProc);
 end;
 
-destructor TCommandList.Destroy;
+destructor TSettings.Destroy;
 begin
   DeallocateHWnd(FHandle);
   FHandle := 0;
-
+  FreeAndNil(FCommands);
   inherited;
 end;
 
-procedure TCommandList.WndProc(var Msg: TMessage);
+procedure TSettings.WndProc(var Msg: TMessage);
 var
   Command: TCommand;
 begin
   if Msg.Msg = CM_COMMAND then
   begin
     try
-      Command := Find(Msg.WParam);
+      Command := Commands.Find(TShortCut(Msg.WParam));
       if Command <> nil then
         Command.Execute;
     except
@@ -203,6 +211,98 @@ begin
   else
     Msg.Result := DefWindowProc(FHandle, Msg.Msg, Msg.wParam, Msg.lParam);
 end;
+
+procedure TSettings.LoadFromFile(const FileName: string);
+var
+  Stream: TFileStream;
+begin
+  Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyWrite);
+  try
+    LoadFromStream(Stream);
+  finally
+    Stream.Free;
+  end;
+end;
+
+procedure TSettings.SaveToFile(const FileName: string);
+var
+  Stream: TFileStream;
+begin
+  Stream := TFileStream.Create(FileName, fmCreate);
+  try
+    SaveToStream(Stream);
+  finally
+    Stream.Free;
+  end;
+end;
+
+procedure TSettings.LoadFromStream(Stream: TStream);
+var
+  Doc: IXMLDocument;
+  Root, Node: IXMLNode;
+  Nodes: IXMLNodeList;
+  I, J: Integer;
+begin
+  Doc := TXMLDocument.Create(nil);
+  Doc.LoadFromStream(Stream);
+
+  Commands.Clear;
+
+  Root := Doc.DocumentElement;
+  for I := 0 to Root.ChildNodes.Count - 1 do
+  begin
+    Node := Root.ChildNodes[I];
+    if Node.NodeName = 'Commands' then
+    begin
+      Nodes := Node.ChildNodes;
+      for J := 0 to Nodes.Count - 1 do
+      begin
+        Node := Nodes[J];
+        Commands.Add(
+          TextToShortCut(Node.Attributes['ShortCut']),
+          VarToStr(Node.Attributes['FileName']),
+          VarToStr(Node.Attributes['Operation']),
+          VarToStr(Node.Attributes['Parameters']),
+          VarToStr(Node.Attributes['WorkingDirectory'])
+        );
+      end;
+    end;
+  end;
+end;
+
+procedure TSettings.SaveToStream(Stream: TStream);
+var
+  Doc: IXMLDocument;
+  OptionsNode, CommandsNode, Node: IXMLNode;
+  I: Integer;
+  Command: TCommand;
+begin
+  Doc := TXMLDocument.Create(nil);
+  Doc.Active := True;
+  Doc.DocumentElement := Doc.CreateNode('Application', ntElement);
+  OptionsNode := Doc.DocumentElement.AddChild('Options'); //Reserved for application options
+  CommandsNode := Doc.DocumentElement.AddChild('Commands');
+  for I := 0 to Commands.Count - 1 do
+  begin
+    Command := Commands[I];
+
+    Node := CommandsNode.AddChild('Command');
+    Node.Attributes['ShortCut'] := ShortCutToText(Command.ShortCut);
+    Node.Attributes['FileName'] := Command.FileName;
+    Node.Attributes['Operation'] := Command.Operation;
+    Node.Attributes['Parameters'] := Command.Parameters;
+    Node.Attributes['WorkingDirectory'] := Command.WorkingDirectory;
+  end;
+
+  Doc.SaveToStream(Stream);
+end;
+
+procedure TSettings.SetEnabled(const Value: Boolean);
+begin
+  FEnabled := Value;
+end;
+
+{ TCommandList }
 
 function TCommandList.Add(const Key: Word; const ShiftState: TShiftState; const FileName, Operation, Parameters, WorkingDirectory: string): TCommand;
 begin
@@ -234,96 +334,6 @@ begin
   Result := nil;
 end;
 
-procedure TCommandList.LoadFromFile(const FileName: string);
-var
-  Stream: TFileStream;
-begin
-  Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyWrite);
-  try
-    LoadFromStream(Stream);
-  finally
-    Stream.Free;
-  end;
-end;
-
-procedure TCommandList.SaveToFile(const FileName: string);
-var
-  Stream: TFileStream;
-begin
-  Stream := TFileStream.Create(FileName, fmCreate);
-  try
-    SaveToStream(Stream);
-  finally
-    Stream.Free;
-  end;
-end;
-
-procedure TCommandList.LoadFromStream(Stream: TStream);
-var
-  Doc: IXMLDocument;
-  Root, Node: IXMLNode;
-  Nodes: IXMLNodeList;
-  I, J: Integer;
-begin
-  Doc := TXMLDocument.Create(nil);
-  Doc.LoadFromStream(Stream);
-
-  Clear;
-
-  Root := Doc.DocumentElement;
-  for I := 0 to Root.ChildNodes.Count - 1 do
-  begin
-    Node := Root.ChildNodes[I];
-    if Node.NodeName = 'Commands' then
-    begin
-      Nodes := Node.ChildNodes;
-      for J := 0 to Nodes.Count - 1 do
-      begin
-        Node := Nodes[J];
-        Add(
-          TextToShortCut(Node.Attributes['ShortCut']),
-          VarToStr(Node.Attributes['FileName']),
-          VarToStr(Node.Attributes['Operation']),
-          VarToStr(Node.Attributes['Parameters']),
-          VarToStr(Node.Attributes['WorkingDirectory'])
-        );
-      end;
-    end;
-  end;
-end;
-
-procedure TCommandList.SaveToStream(Stream: TStream);
-var
-  Doc: IXMLDocument;
-  OptionsNode, CommandsNode, Node: IXMLNode;
-  I: Integer;
-  Command: TCommand;
-begin
-  Doc := TXMLDocument.Create(nil);
-  Doc.Active := True;
-  Doc.DocumentElement := Doc.CreateNode('Application', ntElement);
-  OptionsNode := Doc.DocumentElement.AddChild('Options'); //Reserved for application options
-  CommandsNode := Doc.DocumentElement.AddChild('Commands');
-  for I := 0 to Count - 1 do
-  begin
-    Command := Items[I];
-
-    Node := CommandsNode.AddChild('Command');
-    Node.Attributes['ShortCut'] := ShortCutToText(Command.ShortCut);
-    Node.Attributes['FileName'] := Command.FileName;
-    Node.Attributes['Operation'] := Command.Operation;
-    Node.Attributes['Parameters'] := Command.Parameters;
-    Node.Attributes['WorkingDirectory'] := Command.WorkingDirectory;
-  end;
-
-  Doc.SaveToStream(Stream);
-end;
-
-procedure TCommandList.SetEnabled(const Value: Boolean);
-begin
-  FEnabled := Value;
-end;
-
 type
   KBDLLHOOKSTRUCT = record
     vkCode: DWORD;
@@ -341,7 +351,7 @@ var
   ShortCut: TShortCut;
 begin
   try
-    if Commands.Enabled and (Code = HC_ACTION) and (wParam = WM_KEYDOWN) then
+    if Settings.Enabled and (Code = HC_ACTION) and (wParam = WM_KEYDOWN) then
     begin
       ShortCut := PBDLLHOOKSTRUCT(lParam).vkCode;
       if GetAsyncKeyState(VK_SHIFT) < 0 then
@@ -352,7 +362,7 @@ begin
         Inc(ShortCut, scAlt);
 
       // Send over message queue
-      PostMessage(Commands.Handle, CM_COMMAND, ShortCut, 0);
+      PostMessage(Settings.Handle, CM_COMMAND, ShortCut, 0);
     end;
   except
   end;
@@ -360,11 +370,11 @@ begin
 end;
 
 initialization
-  Commands := TCommandList.Create;
+  Settings := TSettings.Create;
 
   hKeyboardHook := SetWindowsHookEx(WH_KEYBOARD_LL, @KeyboardEvent, hInstance,  0);
 
 finalization
   UnhookWindowsHookEx(hKeyboardHook);
-  FreeAndNil(Commands);
+  FreeAndNil(Settings);
 end.

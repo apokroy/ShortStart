@@ -14,6 +14,7 @@ type
     Version: TLabel;
     ProductName: TLabel;
     OKButton: TButton;
+    Label1: TLabel;
     procedure FormCreate(Sender: TObject);
   private
   public

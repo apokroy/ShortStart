@@ -48,7 +48,7 @@ type
     Exit2: TMenuItem;
     N2: TMenuItem;
     Show1: TMenuItem;
-    TrayDefaultAction: TAction;
+    ShowSettingsAction: TAction;
     ToolButton9: TToolButton;
     ToolButton10: TToolButton;
     RunAction: TAction;
@@ -61,8 +61,17 @@ type
     Enable1: TMenuItem;
     Disable1: TMenuItem;
     NotificationCenter: TNotificationCenter;
+    ShellImageList: TImageList;
+    N4: TMenuItem;
+    Run1: TMenuItem;
+    N5: TMenuItem;
+    Enable2: TMenuItem;
+    Disable2: TMenuItem;
+    N6: TMenuItem;
+    AutoRunAction: TAction;
+    AutorunwithWindows1: TMenuItem;
     procedure FormCreate(Sender: TObject);
-    procedure TrayClick(Sender: TObject);
+    procedure ShowSettingsExecute(Sender: TObject);
     procedure About(Sender: TObject);
     procedure FileExit(Sender: TObject);
     procedure FormClose(Sender: TObject; var Action: TCloseAction);
@@ -78,14 +87,15 @@ type
     procedure DisableActionExecute(Sender: TObject);
     procedure EnableActionUpdate(Sender: TObject);
     procedure DisableActionUpdate(Sender: TObject);
-    procedure NotificationCenterReceiveLocalNotification(Sender: TObject;
-      ANotification: TNotification);
+    procedure NotificationCenterReceiveLocalNotification(Sender: TObject; ANotification: TNotification);
+    procedure AutoRunActionExecute(Sender: TObject);
   private
     HomePath: string;
     SettingsFileName: string;
     Modified: Boolean;
     procedure UpdateView;
     procedure UpdateItem(Item: TListItem; Command: TCommand);
+    function  AddItem(Command: TCommand): TListItem;
     procedure CheckModified;
   protected
     procedure CreateParams(var Params: TCreateParams); override;
@@ -103,13 +113,41 @@ var
 
 implementation
 
-uses System.IOUtils, ShortStart.Forms.About, ShortStart.Forms.Command;
+uses WinAPI.ActiveX, System.Win.ComObj, System.IOUtils, WinAPI.ShellAPI, WinAPI.ShlObj, WinAPI.CommCtrl,
+  ShortStart.Forms.About, ShortStart.Forms.Command;
 
 resourcestring
-  SSaveChanges = 'Save configuration changes?';
+  SSaveChanges = 'Save settings changes?';
   SConfirmDeletion = 'Do you really want to delete this item?';
 
 {$R *.dfm}
+
+function GetFileIcon(const FileName: string): HIcon;
+var
+  Buffer: array[1..1024] of Char;
+  Info: TSHFileInfo;
+  iIcon: Word;
+begin
+  SHGetFileInfo(PChar(FileName), 0, Info, SizeOf(Info), SHGFI_ICON or SHGFI_SMALLICON);
+  Result := Info.hIcon;
+  if Result = 0 then
+  begin
+    StrPCopy(@Buffer, FileName);
+    Result := ExtractAssociatedIcon(hInstance, @Buffer, iIcon);
+  end;
+end;
+
+function GetLinkFileName: string;
+var
+  LStr: array[0..1024] of Char;
+begin
+  SetLastError(ERROR_SUCCESS);
+
+  if SHGetFolderPath(0, CSIDL_STARTUP, 0, 0, @LStr) = S_OK then
+    Result := IncludeTrailingPathDelimiter(string(LStr)) + ChangeFileExt(ExtractFileName(ParamStr(0)), '.lnk')
+  else
+    Result := '';
+end;
 
 { TMainForm }
 
@@ -122,13 +160,13 @@ end;
 
 procedure TMainForm.FormCreate(Sender: TObject);
 begin
-  Caption := Application.Title;
-
   HomePath := IncludeTrailingPathDelimiter(TPath.GetHomePath) + 'ShortStart' + TPath.DirectorySeparatorChar;
   ForceDirectories(HomePath);
   SettingsFileName := HomePath + 'Application.config';
 
   Reload;
+
+  AutoRunAction.Checked := FileExists(GetLinkFileName);
 end;
 
 procedure TMainForm.FormClose(Sender: TObject; var Action: TCloseAction);
@@ -156,7 +194,16 @@ begin
   Show;
 end;
 
+function TMainForm.AddItem(Command: TCommand): TListItem;
+begin
+  Result := View.Items.Add;
+  Result.ImageIndex := -1;
+  UpdateItem(Result, Command);
+end;
+
 procedure TMainForm.UpdateItem(Item: TListItem; Command: TCommand);
+var
+  Icon: HIcon;
 begin
   Item.Caption := Command.FileName;
   Item.SubItems.Clear;
@@ -165,6 +212,19 @@ begin
   Item.SubItems.Add(Command.Parameters);
   Item.SubItems.Add(Command.WorkingDirectory);
   Item.Data := Command;
+
+  if Command.FileName <> '' then
+  begin
+    Icon := GetFileIcon(Command.FileName);
+    if Icon <> 0 then
+    begin
+      if Item.ImageIndex >= 0 then
+        ImageList_ReplaceIcon(ShellImageList.Handle, Item.ImageIndex, Icon)
+      else
+        Item.ImageIndex := ImageList_AddIcon(ShellImageList.Handle, Icon);
+      DestroyIcon(Icon);
+    end;
+  end;
 end;
 
 procedure TMainForm.UpdateView;
@@ -175,27 +235,11 @@ begin
   try
     View.Items.Clear;
 
-    for I := 0 to Commands.Count - 1 do
-      UpdateItem(View.Items.Add, Commands[I]);
+    for I := 0 to Settings.Commands.Count - 1 do
+      AddItem(Settings.Commands[I]);
   finally
     View.Items.EndUpdate;
   end;
-end;
-
-procedure TMainForm.Reload;
-begin
-  if FileExists(SettingsFileName) then
-  begin
-    Commands.LoadFromFile(SettingsFileName);
-    Modified := False;
-    UpdateView;
-  end;
-end;
-
-procedure TMainForm.Save;
-begin
-  Commands.SaveToFile(SettingsFileName);
-  Modified := False;
 end;
 
 procedure TMainForm.CheckModified;
@@ -209,6 +253,22 @@ begin
   end;
 end;
 
+procedure TMainForm.Reload;
+begin
+  if FileExists(SettingsFileName) then
+  begin
+    Settings.LoadFromFile(SettingsFileName);
+    Modified := False;
+    UpdateView;
+  end;
+end;
+
+procedure TMainForm.Save;
+begin
+  Settings.SaveToFile(SettingsFileName);
+  Modified := False;
+end;
+
 procedure TMainForm.Add;
 var
   Command: TCommand;
@@ -216,9 +276,9 @@ begin
   Command := TCommand.Create;
   if TCommandForm.Edit(Command) then
   begin
-    Commands.Add(Command);
+    Settings.Commands.Add(Command);
     Modified := True;
-    UpdateItem(View.Items.Add, Command);
+    AddItem(Command);
   end;
 end;
 
@@ -249,16 +309,23 @@ begin
   if MessageDlg(SConfirmDeletion, mtConfirmation, [mbYes, mbNo], 0) <> mrYes then
     Exit;
 
-  Commands.Remove(Command);
+  Settings.Commands.Remove(Command);
   Command.Free;
   Modified := True;
 
   View.Selected.Delete;
 end;
 
-procedure TMainForm.TrayClick(Sender: TObject);
+{$region Action Handlers}
+
+procedure TMainForm.ShowSettingsExecute(Sender: TObject);
+var
+  ExStyle: NativeInt;
 begin
+  ExStyle := GetWindowLong(Handle, GWL_EXSTYLE) or WS_EX_APPWINDOW;
+  SetWindowLong(Handle, GWL_EXSTYLE, ExStyle);
   Show;
+  SetForegroundWindow(Handle);
 end;
 
 procedure TMainForm.FileExit(Sender: TObject);
@@ -294,13 +361,13 @@ end;
 
 procedure TMainForm.EnableActionExecute(Sender: TObject);
 begin
-  Commands.Enabled := True;
+  Settings.Enabled := True;
 end;
 
 procedure TMainForm.EnableActionUpdate(Sender: TObject);
 begin
-  TAction(Sender).Enabled := not Commands.Enabled;
-  if Commands.Enabled then
+  TAction(Sender).Enabled := not Settings.Enabled;
+  if Settings.Enabled then
     Tray.IconIndex := 0
   else
     Tray.IconIndex := 1;
@@ -308,12 +375,12 @@ end;
 
 procedure TMainForm.DisableActionExecute(Sender: TObject);
 begin
-  Commands.Enabled := False;
+  Settings.Enabled := False;
 end;
 
 procedure TMainForm.DisableActionUpdate(Sender: TObject);
 begin
-  TAction(Sender).Enabled := Commands.Enabled;
+  TAction(Sender).Enabled := Settings.Enabled;
 end;
 
 procedure TMainForm.ViewDblClick(Sender: TObject);
@@ -331,6 +398,34 @@ begin
   TCommand(View.Selected.Data).Execute;
 end;
 
+procedure TMainForm.AutoRunActionExecute(Sender: TObject);
+var
+  Link: IShellLink;
+  LinkFile: IPersistFile;
+  FileName: string;
+  Path: string;
+begin
+  FileName := GetLinkFileName;
+  if FileExists(FileName) then
+  begin
+    DeleteFile(FileName);
+  end
+  else
+  begin
+    Path := '"' + ParamStr(0) + '"';
+
+    OleCheck(CoCreateInstance(CLSID_ShellLink, nil, CLSCTX_INPROC_SERVER, IShellLink, Link));
+    Link.SetDescription(PChar(Application.Title));
+    //Link.SetIconLocation(PChar(Path), 1);
+    Link.SetShowCmd(SW_SHOWNORMAL);
+    Link.SetPath(PChar(Path));
+    Link.Resolve(Handle, SLR_ANY_MATCH);
+    LinkFile := Link as IPersistFile;
+    LinkFile.Save(PChar(FileName), False);
+  end;
+  AutoRunAction.Checked := FileExists(FileName);
+end;
+
 procedure TMainForm.About(Sender: TObject);
 var
   Dlg: TAboutBox;
@@ -343,4 +438,23 @@ begin
   end;
 end;
 
+{$endregion}
+
+var
+  Mutex: THandle;
+  NeedCOMUninitialize: Boolean = False;
+
+initialization
+  Mutex := CreateMutex(nil, True, 'PAL_ShortStart_MTX');
+  if GetLastError = ERROR_ALREADY_EXISTS then
+    Halt(0);
+
+  NeedCOMUninitialize := Succeeded(CoInitializeEx(nil, COINIT_APARTMENTTHREADED or COINIT_DISABLE_OLE1DDE));
+
+finalization
+  if Mutex <> 0 then
+    ReleaseMutex(Mutex);
+
+  if NeedCOMUninitialize then
+    CoUninitialize;
 end.

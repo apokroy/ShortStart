@@ -28,7 +28,7 @@ object AboutBox: TAboutBox
     TabOrder = 0
     object Comments: TLabel
       Left = 8
-      Top = 112
+      Top = 128
       Width = 282
       Height = 41
       AutoSize = False
@@ -76,6 +76,13 @@ object AboutBox: TAboutBox
       Font.Style = [fsBold]
       ParentFont = False
       IsControl = True
+    end
+    object Label1: TLabel
+      Left = 8
+      Top = 99
+      Width = 176
+      Height = 13
+      Caption = 'Button pressed by Natalia Andronova'
     end
   end
   object OKButton: TButton

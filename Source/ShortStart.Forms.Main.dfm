@@ -1,7 +1,7 @@
 object MainForm: TMainForm
   Left = 0
   Top = 0
-  Caption = 'MainForm'
+  Caption = 'Short Start settings'
   ClientHeight = 351
   ClientWidth = 758
   Color = clBtnFace
@@ -137,6 +137,7 @@ object MainForm: TMainForm
       end>
     ReadOnly = True
     RowSelect = True
+    SmallImages = ShellImageList
     TabOrder = 1
     ViewStyle = vsReport
     OnDblClick = ViewDblClick
@@ -145,8 +146,8 @@ object MainForm: TMainForm
     Icons = TrayImageList
     PopupMenu = TrayMenu
     Visible = True
-    OnClick = TrayClick
-    OnDblClick = TrayClick
+    OnClick = ShowSettingsExecute
+    OnDblClick = ShowSettingsExecute
     Left = 328
     Top = 200
   end
@@ -563,11 +564,13 @@ object MainForm: TMainForm
     Left = 96
     Top = 72
     object FileExitAction: TAction
+      Category = 'File'
       Caption = 'Exit'
       ImageIndex = 0
       OnExecute = FileExit
     end
     object FileSaveAction: TAction
+      Category = 'File'
       Caption = 'Save'
       Hint = 'Save settings'
       ImageIndex = 4
@@ -575,6 +578,7 @@ object MainForm: TMainForm
       OnExecute = FileSave
     end
     object FileRevertAction: TAction
+      Category = 'File'
       Caption = 'Revert'
       Hint = 'Revert to saved'
       ImageIndex = 5
@@ -582,12 +586,14 @@ object MainForm: TMainForm
       OnExecute = FileReload
     end
     object AddAction: TAction
+      Category = 'Shortcuts'
       Caption = 'Add'
       ImageIndex = 1
       ShortCut = 16462
       OnExecute = AddExecute
     end
     object EditAction: TAction
+      Category = 'Shortcuts'
       Caption = 'Edit'
       ImageIndex = 2
       ShortCut = 113
@@ -595,6 +601,7 @@ object MainForm: TMainForm
       OnUpdate = SelectedActionUpdate
     end
     object DeleteAction: TAction
+      Category = 'Shortcuts'
       Caption = 'Delete'
       ImageIndex = 3
       ShortCut = 16430
@@ -602,32 +609,42 @@ object MainForm: TMainForm
       OnUpdate = SelectedActionUpdate
     end
     object AboutAction: TAction
+      Category = 'Help'
       Caption = 'About'
       ImageIndex = 6
       ShortCut = 16496
       OnExecute = About
     end
-    object TrayDefaultAction: TAction
-      Caption = 'Show'
-      OnExecute = TrayClick
+    object ShowSettingsAction: TAction
+      Caption = 'Settings...'
+      OnExecute = ShowSettingsExecute
     end
     object RunAction: TAction
+      Category = 'Shortcuts'
       Caption = 'Run'
       ImageIndex = 7
       OnExecute = RunExecute
       OnUpdate = SelectedActionUpdate
     end
     object EnableAction: TAction
+      Category = 'File'
       Caption = 'Enable'
       ImageIndex = 8
       OnExecute = EnableActionExecute
       OnUpdate = EnableActionUpdate
     end
     object DisableAction: TAction
+      Category = 'File'
       Caption = 'Disable'
       ImageIndex = 9
       OnExecute = DisableActionExecute
       OnUpdate = DisableActionUpdate
+    end
+    object AutoRunAction: TAction
+      Category = 'File'
+      Caption = 'Auto run with Windows'
+      Checked = True
+      OnExecute = AutoRunActionExecute
     end
   end
   object MainMenu: TMainMenu
@@ -641,6 +658,21 @@ object MainForm: TMainForm
       end
       object Revert1: TMenuItem
         Action = FileRevertAction
+      end
+      object N5: TMenuItem
+        Caption = '-'
+      end
+      object Enable2: TMenuItem
+        Action = EnableAction
+      end
+      object Disable2: TMenuItem
+        Action = DisableAction
+      end
+      object N6: TMenuItem
+        Caption = '-'
+      end
+      object AutorunwithWindows1: TMenuItem
+        Action = AutoRunAction
       end
       object N1: TMenuItem
         Caption = '-'
@@ -659,6 +691,12 @@ object MainForm: TMainForm
       end
       object Edit2: TMenuItem
         Action = DeleteAction
+      end
+      object N4: TMenuItem
+        Caption = '-'
+      end
+      object Run1: TMenuItem
+        Action = RunAction
       end
     end
     object Help1: TMenuItem
@@ -814,10 +852,10 @@ object MainForm: TMainForm
   end
   object TrayMenu: TPopupMenu
     Images = ActionImageList
-    Left = 336
-    Top = 264
+    Left = 464
+    Top = 200
     object Show1: TMenuItem
-      Action = TrayDefaultAction
+      Action = ShowSettingsAction
     end
     object N3: TMenuItem
       Caption = '-'
@@ -837,7 +875,12 @@ object MainForm: TMainForm
   end
   object NotificationCenter: TNotificationCenter
     OnReceiveLocalNotification = NotificationCenterReceiveLocalNotification
-    Left = 544
-    Top = 208
+    Left = 320
+    Top = 264
+  end
+  object ShellImageList: TImageList
+    ColorDepth = cd32Bit
+    Left = 96
+    Top = 224
   end
 end
