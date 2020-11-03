@@ -6,6 +6,9 @@ uses
  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants, System.Classes, Vcl.Graphics,
  System.Generics.Collections, Vcl.Forms, Vcl.Menus;
 
+const
+  CM_COMMAND = WM_USER + 1;
+
 type
   TCommand = class(TPersistent)
   private
@@ -30,9 +33,13 @@ type
   TCommandList = class(TList<TCommand>)
   private
     FEnabled: Boolean;
+    FHandle: THandle;
     procedure SetEnabled(const Value: Boolean);
+  protected
+    procedure WndProc(var Msg: TMessage);
   public
     constructor Create;
+    destructor Destroy; override;
     function  Add(const ShortCut: TShortCut; const FileName: string; const Operation: string = ''; const Parameters: string = ''; const WorkingDirectory: string = ''): TCommand; overload;
     function  Add(const Key: Word; const ShiftState: TShiftState; const FileName: string; const Operation: string = ''; const Parameters: string = ''; const WorkingDirectory: string = ''): TCommand; overload;
     function  Find(const ShortCut: TShortCut): TCommand;
@@ -41,6 +48,7 @@ type
     procedure LoadFromFile(const FileName: string);
     procedure SaveToFile(const FileName: string);
     property  Enabled: Boolean read FEnabled write SetEnabled;
+    property  Handle: THandle read FHandle;
   end;
 
 var
@@ -65,6 +73,30 @@ begin
     RaiseLastOSError(GetLastError);
 end;
 
+var
+  ProcWnd: HWND;
+
+function EnumProc(hwnd: HWND; ProcessId: LPARAM): BOOL; stdcall;
+var
+  TestId: DWORD;
+begin
+  GetWindowThreadProcessId(hwnd, TestId);
+  if (TestId = DWORD(ProcessId)) and (IsWindowVisible(hwnd)) then
+  begin
+    ProcWnd := hwnd;
+    Result := False;
+  end
+  else
+    Result := True;
+end;
+
+function FindProcessWnd(hProcess: THandle): HWND;
+begin
+  ProcWnd := 0;
+  EnumWindows(@EnumProc, GetProcessId(hProcess));
+  Result := ProcWnd;
+end;
+
 { TCommand }
 
 constructor TCommand.Create;
@@ -76,14 +108,16 @@ end;
 procedure TCommand.Execute;
 var
   ExecInfo: TShellExecuteInfo;
-  NeedUnitialize: Boolean;
+  NeedUninitialize: Boolean;
+  Wnd: HWND;
+  Count: Integer;
 begin
   // This
   //   1: Run application in foreground
   //   2: Prevent keyboard focus from currently active applicaion
   SetForegroundWindow(Application.MainForm.Handle);
 
-  NeedUnitialize := Succeeded(CoInitializeEx(nil, COINIT_APARTMENTTHREADED or COINIT_DISABLE_OLE1DDE));
+  NeedUninitialize := Succeeded(CoInitializeEx(nil, COINIT_APARTMENTTHREADED or COINIT_DISABLE_OLE1DDE));
   try
     FillChar(ExecInfo, SizeOf(ExecInfo), 0);
     ExecInfo.cbSize := SizeOf(ExecInfo);
@@ -99,8 +133,29 @@ begin
     {$WARN SYMBOL_PLATFORM OFF}
     CheckOSError(ShellExecuteEx(@ExecInfo));
     {$WARN SYMBOL_PLATFORM ON}
+
+    // Try to set focus in opened application
+    if ExecInfo.hProcess <> 0 then
+    begin
+      AllowSetForegroundWindow(GetProcessId(ExecInfo.hProcess));
+      Count := 0;
+      Wnd := FindProcessWnd(ExecInfo.hProcess);
+      while (Wnd = 0) and (Count < 20) do
+      begin
+        Sleep(100);
+        Wnd := FindProcessWnd(ExecInfo.hProcess);
+        Inc(Count);
+      end;
+
+      if Wnd <> 0 then
+      begin
+        SetForegroundWindow(Wnd);
+        SetActiveWindow(Wnd);
+        SetFocus(Wnd);
+      end;
+    end;
   finally
-    if NeedUnitialize then
+    if NeedUninitialize then
       CoUninitialize;
   end;
 end;
@@ -117,6 +172,36 @@ begin
   Add(Ord('C'), [ssAlt, ssCtrl], 'calc.exe');
   Add(Ord('P'), [ssAlt, ssCtrl], 'mspaint.exe');
   Add(Ord('D'), [ssAlt, ssCtrl], 'explorer.exe', '', '%DEFAULTUSERPROFILE%');
+
+  FHandle := AllocateHWnd(WndProc);
+end;
+
+destructor TCommandList.Destroy;
+begin
+  DeallocateHWnd(FHandle);
+  FHandle := 0;
+
+  inherited;
+end;
+
+procedure TCommandList.WndProc(var Msg: TMessage);
+var
+  Command: TCommand;
+begin
+  if Msg.Msg = CM_COMMAND then
+  begin
+    try
+      Command := Find(Msg.WParam);
+      if Command <> nil then
+        Command.Execute;
+    except
+      on E: Exception do
+        MainForm.HandleError(E);
+    end;
+    Msg.Result := 0;
+  end
+  else
+    Msg.Result := DefWindowProc(FHandle, Msg.Msg, Msg.wParam, Msg.lParam);
 end;
 
 function TCommandList.Add(const Key: Word; const ShiftState: TShiftState; const FileName, Operation, Parameters, WorkingDirectory: string): TCommand;
@@ -254,26 +339,22 @@ var
 function KeyboardEvent(Code: Integer; wParam: WPARAM; lParam: LPARAM): LRESULT stdcall;
 var
   ShortCut: TShortCut;
-  Command: TCommand;
 begin
   try
     if Commands.Enabled and (Code = HC_ACTION) and (wParam = WM_KEYDOWN) then
     begin
       ShortCut := PBDLLHOOKSTRUCT(lParam).vkCode;
-      if GetKeyState(VK_SHIFT) < 0 then
+      if GetAsyncKeyState(VK_SHIFT) < 0 then
         Inc(ShortCut, scShift);
-      if GetKeyState(VK_CONTROL) < 0 then
+      if GetAsyncKeyState(VK_CONTROL) < 0 then
         Inc(ShortCut, scCtrl);
-      if GetKeyState(VK_MENU) < 0 then
+      if GetAsyncKeyState(VK_MENU) < 0 then
         Inc(ShortCut, scAlt);
 
-      Command := Commands.Find(ShortCut);
-      if Command <> nil then
-        Command.Execute;
+      // Send over message queue
+      PostMessage(Commands.Handle, CM_COMMAND, ShortCut, 0);
     end;
   except
-    on E: Exception do
-      MainForm.HandleError(E);
   end;
   Result := CallNextHookEx(hKeyboardHook, Code, wParam, lParam);
 end;
@@ -281,7 +362,7 @@ end;
 initialization
   Commands := TCommandList.Create;
 
-  hKeyboardHook := SetWindowsHookEx (WH_KEYBOARD_LL, @KeyboardEvent, hInstance,  0);
+  hKeyboardHook := SetWindowsHookEx(WH_KEYBOARD_LL, @KeyboardEvent, hInstance,  0);
 
 finalization
   UnhookWindowsHookEx(hKeyboardHook);
